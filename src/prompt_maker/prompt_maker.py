@@ -1,3 +1,4 @@
+import fnmatch
 import logging
 import os
 import subprocess
@@ -70,14 +71,12 @@ class PromptMaker:
             f"Historical version saved as {HISTORY_PATH / f'{Path(filename).stem}_{DATE}.txt'}"
         )
 
-    def _normalize_exclude_paths(
-        self, exclude_paths: List[str] | None, target_directory: Path
-    ) -> List[Path]:
+    def _normalize_exclude_paths(self, exclude_paths: List[str] | None) -> List[str]:
         if isinstance(exclude_paths, str):
             paths = [path.strip() for path in exclude_paths.split(",")]
         else:
             paths = exclude_paths or []
-        return [target_directory / Path(path) for path in paths]
+        return paths
 
     def _normalize_file_types(self, file_types: List[str] | None) -> List[str]:
         if isinstance(file_types, str):
@@ -147,17 +146,25 @@ class PromptMaker:
                 and file.stat().st_size > 0
             ):
                 relative_path = file.relative_to(directory)
-                if not self._should_exclude(relative_path, exclude_paths):
+                if not self._should_exclude(relative_path, exclude_paths, directory):
                     files.append(relative_path)
                 else:
                     logger.debug(f"Excluding file: {relative_path}")
         return files
 
-    def _should_exclude(self, path: Path, exclude_paths: List[str]) -> bool:
+    def _should_exclude(self, path: Path, exclude_paths: List[str], base_dir: Path) -> bool:
+        str_path = str(path)
         for exclude_path in exclude_paths:
-            exclude_path = Path(exclude_path)
-            if path == exclude_path or path.is_relative_to(exclude_path):
-                return True
+            if "*" in exclude_path:
+                pattern = os.path.join("**", exclude_path)
+                if fnmatch.fnmatch(str_path, pattern):
+                    logger.debug(f"Excluding {str_path} (matched pattern {exclude_path})")
+                    return True
+            else:
+                exclude_path = Path(exclude_path)
+                if path == exclude_path or path.is_relative_to(exclude_path):
+                    logger.debug(f"Excluding {str_path} (matched path {exclude_path})")
+                    return True
         return False
 
     def _write_files_to_txt(
