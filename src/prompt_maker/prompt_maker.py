@@ -3,6 +3,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List
 
 import pathspec
 import pyperclip
@@ -20,170 +21,179 @@ logger = logging.getLogger("rock_info")
 
 @dataclass
 class PromptMaker:
-    """Handles @TODO."""
+    """Handles prompt context generation."""
 
-    def get_prompt_context(self, target_directory="Python/", exclude_paths=None, file_types=None):
-        # Convert exclude_paths to a list if it's a string
-        if isinstance(exclude_paths, str):
-            exclude_paths = [exclude_paths]
-        elif exclude_paths is None:
-            exclude_paths = []
-
-        # Convert file_types to a list if it's a string
-        if isinstance(file_types, str):
-            file_types = file_types.split(",")
-        elif file_types is None:
-            file_types = [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
-
-        empties = False
-
-        if not file_types:
-            file_types = [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
-        notebooks = ".ipynb" in file_types
-
+    def get_prompt_context(
+        self,
+        target_directory: str = "Python/",
+        exclude_paths: List[str] | None = None,
+        file_types: List[str] | None = None,
+    ) -> None:
         target_directory = Path(target_directory).resolve()
+        exclude_paths = self._normalize_exclude_paths(exclude_paths)
+        file_types = self._normalize_file_types(file_types)
 
-        # Set filename
-        relative_target = target_directory.relative_to(PROJECT_PATH)
-        if target_directory != PROJECT_PATH:
-            filename = f'{relative_target.as_posix().replace("/", "_")}_code'
-        else:
-            filename = f"all_project_code"
-        filename_notebook_suffix = "with_notebooks" if notebooks else "no_notebooks"
-        filename_empty_suffix = "with_empty" if empties else "no_empty"
-        file_types_suffix = "_".join([ft[1:] for ft in file_types])
-        suffix = f"_{filename_notebook_suffix}_{filename_empty_suffix}_{file_types_suffix}.txt"
-        filename += suffix
-
-        NOTEBOOKS_DIRS = get_notebooks_dirs(target_directory)
-        os.chdir(PROJECT_PATH)
-
-        ignore_patterns = load_gitignore_patterns(PROJECT_PATH)
+        filename = self._generate_filename(target_directory, file_types)
+        notebooks_dirs = self._get_notebooks_dirs(target_directory)
+        ignore_patterns = self._load_gitignore_patterns(PROJECT_PATH)
 
         notebook_files = {}
-        if notebooks:
-            for NOTEBOOKS_DIR in NOTEBOOKS_DIRS:
-                notebooks = convert_notebooks_to_python(
-                    NOTEBOOKS_DIR, PYTHON_NOTEBOOKS_PATH, ignore_patterns
-                )
-                notebooks = {
-                    str(Path(NOTEBOOKS_DIR).relative_to(PROJECT_PATH) / nb): py
-                    for nb, py in notebooks.items()
-                }
-                notebook_files.update(notebooks)
+        if ".ipynb" in file_types:
+            notebook_files = self._process_notebooks(notebooks_dirs, ignore_patterns)
+        logger.debug(f"Notebook files: {notebook_files}")
 
-        file_paths = get_files(
-            target_directory, ignore_patterns, empties, file_types, exclude_paths
-        )
-
-        # Determine the base directory for reading files
-        base_dir = target_directory if target_directory != PROJECT_PATH else PROJECT_PATH
+        file_paths = self._get_files(target_directory, ignore_patterns, file_types, exclude_paths)
+        logger.debug(f"File paths: {file_paths}")
 
         output_file_path = DATA_PATH / filename
-        write_files_to_txt(file_paths, output_file_path, base_dir, notebook_files, empties)
+        logger.debug(f"Output file path: {output_file_path}")
+        self._write_files_to_txt(file_paths, output_file_path, target_directory, notebook_files)
+        self._copy_to_clipboard(output_file_path)
+        self._save_historical_version(filename, output_file_path)
 
-        # Copy the contents of the output file to the clipboard
-        with open(output_file_path, "r") as file:
-            file_content = file.read()
-            pyperclip.copy(file_content)
-
-        # Save the historical version
-        historical_file_path = HISTORY_PATH / f"{Path(filename).stem}_{DATE}.txt"
-        with open(historical_file_path, "w") as file:
-            file.write(file_content)
-
-        print(
+        logger.info(
             f"All specified files have been written to {output_file_path} and copied to the clipboard."
         )
-        print(f"Historical version saved as {historical_file_path}")
+        logger.info(
+            f"Historical version saved as {HISTORY_PATH / f'{Path(filename).stem}_{DATE}.txt'}"
+        )
 
+    def _normalize_exclude_paths(self, exclude_paths: List[str] | None) -> List[str]:
+        if isinstance(exclude_paths, str):
+            return [exclude_paths]
+        return exclude_paths or []
 
-def load_gitignore_patterns(directory):
-    patterns = []
-    for root, _, files in os.walk(directory):
-        if ".gitignore" in files:
-            gitignore_path = os.path.join(root, ".gitignore")
-            with open(gitignore_path, "r") as gitignore:
-                adjusted_patterns = [
-                    os.path.relpath(os.path.join(root, line.strip()), directory)
-                    for line in gitignore
-                    if line.strip() and not line.startswith("#")
-                ]
-                patterns.extend(adjusted_patterns)
-    return patterns
+    def _normalize_file_types(self, file_types: List[str] | None) -> List[str]:
+        if isinstance(file_types, str):
+            return file_types.split(",")
+        return file_types or [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
 
+    def _generate_filename(self, target_directory: Path, file_types: List[str]) -> str:
+        relative_target = target_directory.relative_to(PROJECT_PATH)
+        base_name = (
+            f'{relative_target.as_posix().replace("/", "_")}_code'
+            if target_directory != PROJECT_PATH
+            else "all_project_code"
+        )
+        notebooks_suffix = "with_notebooks" if ".ipynb" in file_types else "no_notebooks"
+        file_types_suffix = "_".join([ft[1:] for ft in file_types])
+        return f"{base_name}_{notebooks_suffix}_no_empty_{file_types_suffix}.txt"
 
-def is_empty_file(file_path):
-    with open(file_path, "r") as file:
-        content = file.read().strip()
-    return len(content) == 0
+    def _get_notebooks_dirs(self, directory: Path) -> List[Path]:
+        return [
+            Path(root) / "notebooks" for root, dirs, _ in os.walk(directory) if "notebooks" in dirs
+        ]
 
+    def _load_gitignore_patterns(self, directory: Path) -> List[str]:
+        patterns = []
+        for gitignore in directory.rglob(".gitignore"):
+            with gitignore.open() as f:
+                patterns.extend(
+                    [
+                        str(gitignore.parent / line.strip())
+                        for line in f
+                        if line.strip() and not line.startswith("#")
+                    ]
+                )
+        return patterns
 
-def get_files(directory, ignore_patterns, include_empty_files, file_types, exclude_paths):
-    matched_files = []
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
-    for root, _, files in os.walk(directory):
-        for file in files:
-            file_path = os.path.relpath(os.path.join(root, file), directory)
-            if any(file.endswith(ft) for ft in file_types) and not spec.match_file(file_path):
-                if not any(file_path.startswith(ep) for ep in exclude_paths):
-                    if include_empty_files or not is_empty_file(os.path.join(root, file)):
-                        matched_files.append(file_path)
-    return matched_files
+    def _process_notebooks(
+        self, notebooks_dirs: List[Path], ignore_patterns: List[str]
+    ) -> Dict[str, str]:
+        notebook_files = {}
+        for notebooks_dir in notebooks_dirs:
+            notebooks = self._convert_notebooks_to_python(
+                notebooks_dir, PYTHON_NOTEBOOKS_PATH, ignore_patterns
+            )
+            notebook_files.update(
+                {
+                    str(Path(notebooks_dir).relative_to(PROJECT_PATH) / nb): py
+                    for nb, py in notebooks.items()
+                }
+            )
+        return notebook_files
 
+    def _get_files(
+        self,
+        directory: Path,
+        ignore_patterns: List[str],
+        file_types: List[str],
+        exclude_paths: List[str],
+    ) -> List[Path]:
+        spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
+        files = []
+        for file in directory.rglob("*"):
+            if (
+                file.suffix in file_types
+                and not spec.match_file(str(file))
+                and file.stat().st_size > 0
+            ):
+                if any(file.is_relative_to(directory / Path(ep)) for ep in exclude_paths):
+                    logger.debug(f"Excluding file: {file}")
+                else:
+                    files.append(file.relative_to(directory))
+        return files
 
-def write_files_to_txt(file_paths, output_file, base_dir, notebook_files, include_empty_files):
-    with open(output_file, "w") as outfile:
-        # Write the project tree structure to the file
+    def _write_files_to_txt(
+        self,
+        file_paths: List[Path],
+        output_file: Path,
+        base_dir: Path,
+        notebook_files: Dict[str, str],
+    ) -> None:
+        with output_file.open("w") as outfile:
+            self._write_tree_structure(outfile, base_dir)
+            self._write_file_contents(outfile, file_paths, base_dir)
+            self._write_notebook_contents(outfile, notebook_files, base_dir)
+
+    def _write_tree_structure(self, outfile, base_dir: Path) -> None:
         tree_output = subprocess.check_output(
-            ["tree", "-I", "__pycache__|data|misc|venv", "--prune", base_dir], text=True
+            ["tree", "-I", "__pycache__|data|misc|venv", "--prune", str(base_dir)], text=True
         )
         outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
+        outfile.write("Note: Empty files are not included in the list.\n\n")
 
-        # Add note about empty files
-        if not include_empty_files:
-            outfile.write("Note: Empty files are not included in the list.\n\n")
-
-        # Write the files to the file
+    def _write_file_contents(self, outfile, file_paths: List[Path], base_dir: Path) -> None:
         for file_path in file_paths:
-            absolute_path = os.path.join(base_dir, file_path)
-            with open(absolute_path, "r") as infile:
-                content = infile.read()
-            if file_path.endswith(".py"):
-                outfile.write(f"{file_path}\n```py\n{content}```\n\n")
-            elif file_path.endswith(".md"):
-                outfile.write(f"{file_path}\n```markdown\n{content}```\n\n")
-            elif file_path.endswith(".html"):
-                outfile.write(f"{file_path}\n```html\n{content}```\n\n")
-            else:
-                outfile.write(f"{file_path}\n```plaintext\n{content}```\n\n")
+            content = (base_dir / file_path).read_text()
+            lang = (
+                file_path.suffix[1:] if file_path.suffix in [".py", ".md", ".html"] else "plaintext"
+            )
+            outfile.write(f"{file_path}\n```{lang}\n{content}```\n\n")
 
-        # Write the notebook files to the file
+    def _write_notebook_contents(
+        self, outfile, notebook_files: Dict[str, str], base_dir: Path
+    ) -> None:
         for notebook_path, py_file_path in notebook_files.items():
-            absolute_path = os.path.join(base_dir, py_file_path)
-            with open(absolute_path, "r") as infile:
-                code = infile.read()
+            code = Path(py_file_path).read_text()
             outfile.write(f"{notebook_path}\n```ipynb\n{code}\n```\n\n")
 
+    def _copy_to_clipboard(self, file_path: Path) -> None:
+        pyperclip.copy(file_path.read_text())
 
-def convert_notebooks_to_python(notebooks_dir, output_dir, ignore_patterns):
-    notebook_files = {}
-    spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
-    for root, _, files in os.walk(notebooks_dir):
-        for file in files:
-            file_path = os.path.relpath(os.path.join(root, file), notebooks_dir)
-            if file.endswith(".ipynb") and not spec.match_file(file_path):
-                notebook_path = os.path.join(root, file)
-                command = f'jupyter nbconvert --to script --no-prompt "{notebook_path}" --output-dir="{output_dir}" > /dev/null 2>&1'
-                os.system(command)
-                py_file_path = os.path.join(output_dir, Path(file).stem + ".py")
-                notebook_files[file_path] = py_file_path
-    return notebook_files
+    def _save_historical_version(self, filename: str, output_file_path: Path) -> None:
+        historical_file_path = HISTORY_PATH / f"{Path(filename).stem}_{DATE}.txt"
+        historical_file_path.write_text(output_file_path.read_text())
 
-
-def get_notebooks_dirs(directory):
-    notebooks_dirs = []
-    for root, dirs, _ in os.walk(directory):
-        if "notebooks" in dirs:
-            notebooks_dirs.append(os.path.join(root, "notebooks"))
-    return notebooks_dirs
+    def _convert_notebooks_to_python(
+        self, notebooks_dir: Path, output_dir: Path, ignore_patterns: List[str]
+    ) -> Dict[str, str]:
+        notebook_files = {}
+        spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
+        for notebook in notebooks_dir.rglob("*.ipynb"):
+            if not spec.match_file(str(notebook)):
+                py_file_path = output_dir / f"{notebook.stem}.py"
+                subprocess.run(
+                    [
+                        "jupyter",
+                        "nbconvert",
+                        "--to",
+                        "script",
+                        "--no-prompt",
+                        str(notebook),
+                        f"--output={py_file_path}",
+                    ],
+                    capture_output=True,
+                )
+                notebook_files[str(notebook.relative_to(notebooks_dir))] = str(py_file_path)
+        return notebook_files
