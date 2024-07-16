@@ -2,7 +2,7 @@ import logging
 from functools import wraps
 from inspect import signature
 
-logger = logging.getLogger("logging")
+logger = logging.getLogger(__name__)
 
 
 def format_args(method, args, kwargs):

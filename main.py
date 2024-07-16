@@ -13,7 +13,7 @@ logging.basicConfig(
 logging.getLogger("matplotlib.font_manager").setLevel(
     logging.ERROR
 )  # Deactivate bugged matplotlib DEBUG logger
-logger = logging.getLogger("main")
+logger = logging.getLogger(__name__)
 
 
 @dataclass

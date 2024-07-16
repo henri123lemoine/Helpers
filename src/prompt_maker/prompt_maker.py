@@ -16,7 +16,7 @@ from src.settings import (
     PYTHON_NOTEBOOKS_PATH,
 )
 
-logger = logging.getLogger("rock_info")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
