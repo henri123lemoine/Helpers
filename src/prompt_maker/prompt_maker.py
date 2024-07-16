@@ -2,11 +2,18 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import pathspec
 import pyperclip
+
+from src.settings import (
+    DATA_PATH,
+    DATE,
+    HISTORY_PATH,
+    PROJECT_PATH,
+    PYTHON_NOTEBOOKS_PATH,
+)
 
 logger = logging.getLogger("rock_info")
 
@@ -34,18 +41,11 @@ class PromptMaker:
             file_types = [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
         notebooks = ".ipynb" in file_types
 
-        PROJECT_DIR = Path(__file__).resolve().parent.parent
         target_directory = Path(target_directory).resolve()
 
-        MISC_DIR = PROJECT_DIR / "misc"
-        DATA_DIR = MISC_DIR / "data"
-        HISTORY_DIR = DATA_DIR / "history"
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-
         # Set filename
-        relative_target = target_directory.relative_to(PROJECT_DIR)
-        if target_directory != PROJECT_DIR:
+        relative_target = target_directory.relative_to(PROJECT_PATH)
+        if target_directory != PROJECT_PATH:
             filename = f'{relative_target.as_posix().replace("/", "_")}_code'
         else:
             filename = f"all_project_code"
@@ -56,18 +56,18 @@ class PromptMaker:
         filename += suffix
 
         NOTEBOOKS_DIRS = get_notebooks_dirs(target_directory)
-        os.chdir(PROJECT_DIR)
+        os.chdir(PROJECT_PATH)
 
-        ignore_patterns = load_gitignore_patterns(PROJECT_DIR)
+        ignore_patterns = load_gitignore_patterns(PROJECT_PATH)
 
         notebook_files = {}
         if notebooks:
             for NOTEBOOKS_DIR in NOTEBOOKS_DIRS:
                 notebooks = convert_notebooks_to_python(
-                    NOTEBOOKS_DIR, MISC_DIR / "python", ignore_patterns
+                    NOTEBOOKS_DIR, PYTHON_NOTEBOOKS_PATH, ignore_patterns
                 )
                 notebooks = {
-                    str(Path(NOTEBOOKS_DIR).relative_to(PROJECT_DIR) / nb): py
+                    str(Path(NOTEBOOKS_DIR).relative_to(PROJECT_PATH) / nb): py
                     for nb, py in notebooks.items()
                 }
                 notebook_files.update(notebooks)
@@ -77,9 +77,9 @@ class PromptMaker:
         )
 
         # Determine the base directory for reading files
-        base_dir = target_directory if target_directory != PROJECT_DIR else PROJECT_DIR
+        base_dir = target_directory if target_directory != PROJECT_PATH else PROJECT_PATH
 
-        output_file_path = DATA_DIR / filename
+        output_file_path = DATA_PATH / filename
         write_files_to_txt(file_paths, output_file_path, base_dir, notebook_files, empties)
 
         # Copy the contents of the output file to the clipboard
@@ -88,8 +88,7 @@ class PromptMaker:
             pyperclip.copy(file_content)
 
         # Save the historical version
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        historical_file_path = HISTORY_DIR / f"{Path(filename).stem}_{timestamp}.txt"
+        historical_file_path = HISTORY_PATH / f"{Path(filename).stem}_{DATE}.txt"
         with open(historical_file_path, "w") as file:
             file.write(file_content)
 
