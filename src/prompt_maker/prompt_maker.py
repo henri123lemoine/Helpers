@@ -29,16 +29,27 @@ class PromptMaker:
         exclude_paths: List[str] | None = None,
         file_types: List[str] | None = None,
     ) -> None:
-        target_directory = Path(target_directory).resolve()
+        # Expand user directory (tilde) and resolve the path
+        target_directory = Path(os.path.expanduser(target_directory)).resolve()
+        logger.debug(f"Target directory: {target_directory}")
+
         exclude_paths = self._normalize_exclude_paths(exclude_paths)
+        logger.debug(f"Exclude paths: {exclude_paths}")
+
         file_types = self._normalize_file_types(file_types)
+        logger.debug(f"File types: {file_types}")
 
         filename = self._generate_filename(target_directory, file_types)
+        logger.debug(f"Generated filename: {filename}")
+
         notebooks_dirs = self._get_notebooks_dirs(target_directory)
-        ignore_patterns = self._load_gitignore_patterns(PROJECT_PATH)
+        logger.debug(f"Notebooks directories: {notebooks_dirs}")
+
+        ignore_patterns = self._load_gitignore_patterns(target_directory)
+        logger.debug(f"Ignore patterns: {ignore_patterns}")
 
         notebook_files = {}
-        if ".ipynb" in file_types:
+        if file_types is None or ".ipynb" in file_types:
             notebook_files = self._process_notebooks(notebooks_dirs, ignore_patterns)
         logger.debug(f"Notebook files: {notebook_files}")
 
@@ -47,6 +58,7 @@ class PromptMaker:
 
         output_file_path = DATA_PATH / filename
         logger.debug(f"Output file path: {output_file_path}")
+
         self._write_files_to_txt(file_paths, output_file_path, target_directory, notebook_files)
         self._copy_to_clipboard(output_file_path)
         self._save_historical_version(filename, output_file_path)
@@ -60,7 +72,7 @@ class PromptMaker:
 
     def _normalize_exclude_paths(self, exclude_paths: List[str] | None) -> List[str]:
         if isinstance(exclude_paths, str):
-            return [exclude_paths]
+            return [path.strip() for path in exclude_paths.split(",")]
         return exclude_paths or []
 
     def _normalize_file_types(self, file_types: List[str] | None) -> List[str]:
@@ -69,12 +81,13 @@ class PromptMaker:
         return file_types or [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
 
     def _generate_filename(self, target_directory: Path, file_types: List[str]) -> str:
-        relative_target = target_directory.relative_to(PROJECT_PATH)
-        base_name = (
-            f'{relative_target.as_posix().replace("/", "_")}_code'
-            if target_directory != PROJECT_PATH
-            else "all_project_code"
-        )
+        try:
+            relative_target = target_directory.relative_to(PROJECT_PATH)
+            base_name = f'{relative_target.as_posix().replace("/", "_")}_code'
+        except ValueError:
+            # If target_directory is not relative to PROJECT_PATH, use its name
+            base_name = f"{target_directory.name}_code"
+
         notebooks_suffix = "with_notebooks" if ".ipynb" in file_types else "no_notebooks"
         file_types_suffix = "_".join([ft[1:] for ft in file_types])
         return f"{base_name}_{notebooks_suffix}_no_empty_{file_types_suffix}.txt"
@@ -124,14 +137,18 @@ class PromptMaker:
         files = []
         for file in directory.rglob("*"):
             if (
-                file.suffix in file_types
+                file.is_file()
+                and (file_types is None or file.suffix in file_types)
                 and not spec.match_file(str(file))
                 and file.stat().st_size > 0
             ):
-                if any(file.is_relative_to(directory / Path(ep)) for ep in exclude_paths):
-                    logger.debug(f"Excluding file: {file}")
+                relative_path = file.relative_to(directory)
+                if not any(
+                    relative_path.match(ep) or str(relative_path) == ep for ep in exclude_paths
+                ):
+                    files.append(relative_path)
                 else:
-                    files.append(file.relative_to(directory))
+                    logger.debug(f"Excluding file: {relative_path}")
         return files
 
     def _write_files_to_txt(
@@ -147,10 +164,17 @@ class PromptMaker:
             self._write_notebook_contents(outfile, notebook_files, base_dir)
 
     def _write_tree_structure(self, outfile, base_dir: Path) -> None:
-        tree_output = subprocess.check_output(
-            ["tree", "-I", "__pycache__|data|misc|venv", "--prune", str(base_dir)], text=True
-        )
-        outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
+        try:
+            tree_output = subprocess.check_output(
+                ["tree", "-I", "__pycache__|data|misc|venv", "--prune", str(base_dir)],
+                text=True,
+                stderr=subprocess.STDOUT,
+            )
+            outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to generate tree structure: {e.output}")
+            outfile.write("Project Structure: Unable to generate tree structure.\n\n")
+
         outfile.write("Note: Empty files are not included in the list.\n\n")
 
     def _write_file_contents(self, outfile, file_paths: List[Path], base_dir: Path) -> None:
