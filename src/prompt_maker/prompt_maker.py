@@ -70,10 +70,14 @@ class PromptMaker:
             f"Historical version saved as {HISTORY_PATH / f'{Path(filename).stem}_{DATE}.txt'}"
         )
 
-    def _normalize_exclude_paths(self, exclude_paths: List[str] | None) -> List[str]:
+    def _normalize_exclude_paths(
+        self, exclude_paths: List[str] | None, target_directory: Path
+    ) -> List[Path]:
         if isinstance(exclude_paths, str):
-            return [path.strip() for path in exclude_paths.split(",")]
-        return exclude_paths or []
+            paths = [path.strip() for path in exclude_paths.split(",")]
+        else:
+            paths = exclude_paths or []
+        return [target_directory / Path(path) for path in paths]
 
     def _normalize_file_types(self, file_types: List[str] | None) -> List[str]:
         if isinstance(file_types, str):
@@ -143,13 +147,18 @@ class PromptMaker:
                 and file.stat().st_size > 0
             ):
                 relative_path = file.relative_to(directory)
-                if not any(
-                    relative_path.match(ep) or str(relative_path) == ep for ep in exclude_paths
-                ):
+                if not self._should_exclude(relative_path, exclude_paths):
                     files.append(relative_path)
                 else:
                     logger.debug(f"Excluding file: {relative_path}")
         return files
+
+    def _should_exclude(self, path: Path, exclude_paths: List[str]) -> bool:
+        for exclude_path in exclude_paths:
+            exclude_path = Path(exclude_path)
+            if path == exclude_path or path.is_relative_to(exclude_path):
+                return True
+        return False
 
     def _write_files_to_txt(
         self,
