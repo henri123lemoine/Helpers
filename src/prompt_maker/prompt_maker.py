@@ -1,10 +1,10 @@
 import fnmatch
+import json
 import logging
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
 
 import pathspec
 import pyperclip
@@ -27,10 +27,9 @@ class PromptMaker:
     def get_prompt_context(
         self,
         target_directory: str = "Python/",
-        exclude_paths: List[str] | None = None,
-        file_types: List[str] | None = None,
+        exclude_paths: list[str] | None = None,
+        file_types: list[str] | None = None,
     ) -> None:
-        # Expand user directory (tilde) and resolve the path
         target_directory = Path(os.path.expanduser(target_directory)).resolve()
         logger.debug(f"Target directory: {target_directory}")
 
@@ -43,16 +42,8 @@ class PromptMaker:
         filename = self._generate_filename(target_directory, file_types)
         logger.debug(f"Generated filename: {filename}")
 
-        notebooks_dirs = self._get_notebooks_dirs(target_directory)
-        logger.debug(f"Notebooks directories: {notebooks_dirs}")
-
         ignore_patterns = self._load_gitignore_patterns(target_directory)
         logger.debug(f"Ignore patterns: {ignore_patterns}")
-
-        notebook_files = {}
-        if file_types is None or ".ipynb" in file_types:
-            notebook_files = self._process_notebooks(notebooks_dirs, ignore_patterns)
-        logger.debug(f"Notebook files: {notebook_files}")
 
         file_paths = self._get_files(target_directory, ignore_patterns, file_types, exclude_paths)
         logger.debug(f"File paths: {file_paths}")
@@ -60,7 +51,7 @@ class PromptMaker:
         output_file_path = DATA_PATH / filename
         logger.debug(f"Output file path: {output_file_path}")
 
-        self._write_files_to_txt(file_paths, output_file_path, target_directory, notebook_files)
+        self._write_files_to_txt(file_paths, output_file_path, target_directory)
         self._copy_to_clipboard(output_file_path)
         self._save_historical_version(filename, output_file_path)
 
@@ -71,19 +62,19 @@ class PromptMaker:
             f"Historical version saved as {HISTORY_PATH / f'{Path(filename).stem}_{DATE}.txt'}"
         )
 
-    def _normalize_exclude_paths(self, exclude_paths: List[str] | None) -> List[str]:
+    def _normalize_exclude_paths(self, exclude_paths: list[str] | None) -> list[str]:
         if isinstance(exclude_paths, str):
             paths = [path.strip() for path in exclude_paths.split(",")]
         else:
             paths = exclude_paths or []
         return paths
 
-    def _normalize_file_types(self, file_types: List[str] | None) -> List[str]:
+    def _normalize_file_types(self, file_types: list[str] | None) -> list[str]:
         if isinstance(file_types, str):
             return file_types.split(",")
         return file_types or [".py", ".md", ".ipynb", ".js", ".html", ".css", ".json", ".yaml"]
 
-    def _generate_filename(self, target_directory: Path, file_types: List[str]) -> str:
+    def _generate_filename(self, target_directory: Path, file_types: list[str]) -> str:
         try:
             relative_target = target_directory.relative_to(PROJECT_PATH)
             base_name = f'{relative_target.as_posix().replace("/", "_")}_code'
@@ -95,12 +86,7 @@ class PromptMaker:
         file_types_suffix = "_".join([ft[1:] for ft in file_types])
         return f"{base_name}_{notebooks_suffix}_no_empty_{file_types_suffix}.txt"
 
-    def _get_notebooks_dirs(self, directory: Path) -> List[Path]:
-        return [
-            Path(root) / "notebooks" for root, dirs, _ in os.walk(directory) if "notebooks" in dirs
-        ]
-
-    def _load_gitignore_patterns(self, directory: Path) -> List[str]:
+    def _load_gitignore_patterns(self, directory: Path) -> list[str]:
         patterns = []
         for gitignore in directory.rglob(".gitignore"):
             with gitignore.open() as f:
@@ -113,29 +99,13 @@ class PromptMaker:
                 )
         return patterns
 
-    def _process_notebooks(
-        self, notebooks_dirs: List[Path], ignore_patterns: List[str]
-    ) -> Dict[str, str]:
-        notebook_files = {}
-        for notebooks_dir in notebooks_dirs:
-            notebooks = self._convert_notebooks_to_python(
-                notebooks_dir, PYTHON_NOTEBOOKS_PATH, ignore_patterns
-            )
-            notebook_files.update(
-                {
-                    str(Path(notebooks_dir).relative_to(PROJECT_PATH) / nb): py
-                    for nb, py in notebooks.items()
-                }
-            )
-        return notebook_files
-
     def _get_files(
         self,
         directory: Path,
-        ignore_patterns: List[str],
-        file_types: List[str],
-        exclude_paths: List[str],
-    ) -> List[Path]:
+        ignore_patterns: list[str],
+        file_types: list[str],
+        exclude_paths: list[str],
+    ) -> list[Path]:
         spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
         files = []
         for file in directory.rglob("*"):
@@ -146,13 +116,13 @@ class PromptMaker:
                 and file.stat().st_size > 0
             ):
                 relative_path = file.relative_to(directory)
-                if not self._should_exclude(relative_path, exclude_paths, directory):
+                if not self._should_exclude(relative_path, exclude_paths):
                     files.append(relative_path)
                 else:
                     logger.debug(f"Excluding file: {relative_path}")
         return files
 
-    def _should_exclude(self, path: Path, exclude_paths: List[str], base_dir: Path) -> bool:
+    def _should_exclude(self, path: Path, exclude_paths: list[str]) -> bool:
         str_path = str(path)
         for exclude_path in exclude_paths:
             if "*" in exclude_path:
@@ -169,15 +139,13 @@ class PromptMaker:
 
     def _write_files_to_txt(
         self,
-        file_paths: List[Path],
+        file_paths: list[Path],
         output_file: Path,
         base_dir: Path,
-        notebook_files: Dict[str, str],
     ) -> None:
         with output_file.open("w") as outfile:
             self._write_tree_structure(outfile, base_dir)
             self._write_file_contents(outfile, file_paths, base_dir)
-            self._write_notebook_contents(outfile, notebook_files, base_dir)
 
     def _write_tree_structure(self, outfile, base_dir: Path) -> None:
         try:
@@ -193,36 +161,16 @@ class PromptMaker:
 
         outfile.write("Note: Empty files are not included in the list.\n\n")
 
-    def _write_file_contents(self, outfile, file_paths: List[Path], base_dir: Path) -> None:
+    def _write_file_contents(self, outfile, file_paths: list[Path], base_dir: Path) -> None:
         for file_path in file_paths:
-            content = (base_dir / file_path).read_text()
-            lang = (
-                file_path.suffix[1:] if file_path.suffix in [".py", ".md", ".html"] else "plaintext"
-            )
-            outfile.write(f"{file_path}\n```{lang}\n{content}```\n\n")
-
-    def _write_notebook_contents(
-        self, outfile, notebook_files: Dict[str, str], base_dir: Path
-    ) -> None:
-        for notebook_path, py_file_path in notebook_files.items():
-            code = Path(py_file_path).read_text()
-            outfile.write(f"{notebook_path}\n```ipynb\n{code}\n```\n\n")
-
-    def _copy_to_clipboard(self, file_path: Path) -> None:
-        pyperclip.copy(file_path.read_text())
-
-    def _save_historical_version(self, filename: str, output_file_path: Path) -> None:
-        historical_file_path = HISTORY_PATH / f"{Path(filename).stem}_{DATE}.txt"
-        historical_file_path.write_text(output_file_path.read_text())
-
-    def _convert_notebooks_to_python(
-        self, notebooks_dir: Path, output_dir: Path, ignore_patterns: List[str]
-    ) -> Dict[str, str]:
-        notebook_files = {}
-        spec = pathspec.PathSpec.from_lines("gitwildmatch", ignore_patterns)
-        for notebook in notebooks_dir.rglob("*.ipynb"):
-            if not spec.match_file(str(notebook)):
-                py_file_path = output_dir / f"{notebook.stem}.py"
+            full_file_path = base_dir / file_path
+            suffix = file_path.suffix
+            lang = file_path.suffix.removeprefix(".")
+            if suffix == ".ipynb":
+                python_noteboook_path = PYTHON_NOTEBOOKS_PATH / f"{file_path.stem}"
+                logger.debug(
+                    f"Converting notebook {full_file_path} to Python file {python_noteboook_path}.py"
+                )
                 subprocess.run(
                     [
                         "jupyter",
@@ -230,10 +178,22 @@ class PromptMaker:
                         "--to",
                         "script",
                         "--no-prompt",
-                        str(notebook),
-                        f"--output={py_file_path}",
+                        str(full_file_path),
+                        f"--output={python_noteboook_path}",
                     ],
                     capture_output=True,
                 )
-                notebook_files[str(notebook.relative_to(notebooks_dir))] = str(py_file_path)
-        return notebook_files
+                with open(f"{python_noteboook_path}.py", "r") as f:
+                    content = f.read()
+            elif suffix == ".json":
+                content = json.dumps(json.loads(content), indent=4)
+            else:
+                content = full_file_path.read_text()
+            outfile.write(f"{file_path}\n```{lang}\n{content}```\n\n")
+
+    def _copy_to_clipboard(self, file_path: Path) -> None:
+        pyperclip.copy(file_path.read_text())
+
+    def _save_historical_version(self, filename: str, output_file_path: Path) -> None:
+        historical_file_path = HISTORY_PATH / f"{Path(filename).stem}_{DATE}.txt"
+        historical_file_path.write_text(output_file_path.read_text())
