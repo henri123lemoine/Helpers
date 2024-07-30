@@ -29,6 +29,7 @@ class PromptMaker:
         target_directory: str = "Python/",
         exclude_paths: list[str] | None = None,
         file_types: list[str] | None = None,
+        tree: bool = True,  # @TODO: fix for extremely large trees that are not pruned by the contents of exclude_paths/gitignore; must fix the tree command
     ) -> None:
         target_directory = Path(os.path.expanduser(target_directory)).resolve()
         logger.debug(f"Target directory: {target_directory}")
@@ -51,7 +52,7 @@ class PromptMaker:
         output_file_path = DATA_PATH / filename
         logger.debug(f"Output file path: {output_file_path}")
 
-        self._write_files_to_txt(file_paths, output_file_path, target_directory)
+        self._write_files_to_txt(file_paths, output_file_path, target_directory, tree)
         self._copy_to_clipboard(output_file_path)
         self._save_historical_version(filename, output_file_path)
 
@@ -142,9 +143,11 @@ class PromptMaker:
         file_paths: list[Path],
         output_file: Path,
         base_dir: Path,
+        tree: bool = True,
     ) -> None:
         with output_file.open("w") as outfile:
-            self._write_tree_structure(outfile, base_dir)
+            if tree:
+                self._write_tree_structure(outfile, base_dir)
             self._write_file_contents(outfile, file_paths, base_dir)
 
     def _write_tree_structure(self, outfile, base_dir: Path) -> None:
