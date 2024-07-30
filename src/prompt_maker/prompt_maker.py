@@ -9,7 +9,7 @@ from pathlib import Path
 import pathspec
 import pyperclip
 
-from src.settings import (
+from utils.settings import (
     DATA_PATH,
     DATE,
     HISTORY_PATH,
