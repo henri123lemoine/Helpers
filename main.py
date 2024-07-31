@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 @log_all_methods
-class Main:
+class Helpers:
     def prompt_maker(self, *args, **kwargs):
         from src.prompt_maker.prompt_maker import PromptMaker
 
@@ -26,4 +26,4 @@ class Main:
 
 
 if __name__ == "__main__":
-    fire.Fire(Main)
+    fire.Fire(Helpers)
