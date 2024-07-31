@@ -162,6 +162,8 @@ cython_debug/
 #.idea/
 
 .sesskey
+.python-version
 
 # Miscellaneous
 data/
+models/
