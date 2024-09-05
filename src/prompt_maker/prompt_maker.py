@@ -152,17 +152,23 @@ class PromptMaker:
 
     def _write_tree_structure(self, outfile, base_dir: Path) -> None:
         try:
-            tree_output = subprocess.check_output(
-                ["tree", "-I", "__pycache__|data|misc|venv", "--prune", str(base_dir)],
-                text=True,
-                stderr=subprocess.STDOUT,
-            )
-            outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to generate tree structure: {e.output}")
-            outfile.write("Project Structure: Unable to generate tree structure.\n\n")
+            git_files = subprocess.check_output(
+                ["git", "ls-files"], cwd=base_dir, text=True, stderr=subprocess.DEVNULL
+            ).splitlines()
 
-        outfile.write("Note: Empty files are not included in the list.\n\n")
+            tree_output = subprocess.check_output(
+                ["tree", "--fromfile"],
+                input="\n".join(git_files),
+                cwd=base_dir,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+
+            outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
+            outfile.write("Note: This structure includes only Git-tracked files.\n\n")
+        except subprocess.CalledProcessError:
+            logger.warning("Failed to generate tree structure")
+            outfile.write("Project Structure: Unable to generate tree structure.\n\n")
 
     def _write_file_contents(self, outfile, file_paths: list[Path], base_dir: Path) -> None:
         for file_path in file_paths:
