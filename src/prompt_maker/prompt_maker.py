@@ -175,31 +175,46 @@ class PromptMaker:
         for file_path in file_paths:
             full_file_path = base_dir / file_path
             suffix = file_path.suffix
-            lang = file_path.suffix.removeprefix(".")
-            if suffix == ".ipynb":
-                python_noteboook_path = PYTHON_NOTEBOOKS_PATH / f"{file_path.stem}"
-                logger.debug(
-                    f"Converting notebook {full_file_path} to Python file {python_noteboook_path}.py"
-                )
-                subprocess.run(
-                    [
-                        "jupyter",
-                        "nbconvert",
-                        "--to",
-                        "script",
-                        "--no-prompt",
-                        str(full_file_path),
-                        f"--output={python_noteboook_path}",
-                    ],
-                    capture_output=True,
-                )
-                with open(f"{python_noteboook_path}.py", "r") as f:
-                    content = f.read()
-            elif suffix == ".json":
-                content = json.dumps(json.loads(content), indent=4)
-            else:
-                content = full_file_path.read_text()
-            outfile.write(f"{file_path}\n```{lang}\n{content}```\n\n")
+            lang = suffix.removeprefix(".")
+
+            try:
+                if suffix == ".ipynb":
+                    content = self._convert_notebook_to_script(full_file_path)
+                elif suffix == ".json":
+                    content = self._format_json(full_file_path)
+                else:
+                    content = full_file_path.read_text()
+
+                outfile.write(f"{file_path}\n```{lang}\n{content}```\n\n")
+            except Exception as e:
+                logger.error(f"Error processing file {file_path}: {str(e)}")
+                outfile.write(f"{file_path}\nError: Unable to process this file.\n\n")
+
+    def _convert_notebook_to_script(self, notebook_path: Path) -> str:
+        python_notebook_path = PYTHON_NOTEBOOKS_PATH / f"{notebook_path.stem}"
+        logger.debug(
+            f"Converting notebook {notebook_path} to Python file {python_notebook_path}.py"
+        )
+
+        subprocess.run(
+            [
+                "jupyter",
+                "nbconvert",
+                "--to",
+                "script",
+                "--no-prompt",
+                str(notebook_path),
+                f"--output={python_notebook_path}",
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        return (python_notebook_path.with_suffix(".py")).read_text()
+
+    def _format_json(self, json_path: Path) -> str:
+        with json_path.open() as f:
+            return json.dumps(json.load(f), indent=4)
 
     def _copy_to_clipboard(self, file_path: Path) -> None:
         pyperclip.copy(file_path.read_text())
