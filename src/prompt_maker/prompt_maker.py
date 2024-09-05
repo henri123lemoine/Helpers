@@ -5,6 +5,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 import pathspec
 import pyperclip
@@ -26,7 +27,7 @@ class PromptMaker:
 
     def get_prompt_context(
         self,
-        target_directory: str = "Python/",
+        target_directory: Union[str, Path] = "Python/",
         exclude_paths: list[str] | None = None,
         file_types: list[str] | None = None,
         tree: bool = True,  # @TODO: fix for extremely large trees that are not pruned by the contents of exclude_paths/gitignore; must fix the tree command
