@@ -153,23 +153,47 @@ class PromptMaker:
 
     def _write_tree_structure(self, outfile, base_dir: Path) -> None:
         try:
-            git_files = subprocess.check_output(
-                ["git", "ls-files"], cwd=base_dir, text=True, stderr=subprocess.DEVNULL
+            # Check if we're in a Git repository
+            subprocess.check_output(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=base_dir,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # If we are, use git ls-tree to respect .gitignore
+            tree_output = subprocess.check_output(
+                ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+                cwd=base_dir,
+                text=True,
+                stderr=subprocess.DEVNULL,
             ).splitlines()
 
-            tree_output = subprocess.check_output(
+            # Use tree command with the list of Git-tracked files
+            tree_input = "\n".join(tree_output)
+            tree_result = subprocess.check_output(
                 ["tree", "--fromfile"],
-                input="\n".join(git_files),
+                input=tree_input,
                 cwd=base_dir,
                 text=True,
                 stderr=subprocess.DEVNULL,
             )
 
-            outfile.write(f"Project Structure:\n```\n{tree_output}```\n\n")
-            outfile.write("Note: This structure includes only Git-tracked files.\n\n")
+            outfile.write(f"Project Structure:\n```\n{tree_result}```\n\n")
         except subprocess.CalledProcessError:
-            logger.warning("Failed to generate tree structure")
-            outfile.write("Project Structure: Unable to generate tree structure.\n\n")
+            # If we're not in a Git repository, use a limited depth tree. This avoids common issues with enormous trees
+            try:
+                tree_output = subprocess.check_output(
+                    ["tree", "-L", "3"],  # Limit depth to 3 levels
+                    cwd=base_dir,
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                outfile.write(
+                    f"Project Structure (limited to 3 levels):\n```\n{tree_output}```\n\n"
+                )
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to generate tree structure")
+                outfile.write("Project Structure: Unable to generate tree structure.\n\n")
 
     def _write_file_contents(self, outfile, file_paths: list[Path], base_dir: Path) -> None:
         for file_path in file_paths:
