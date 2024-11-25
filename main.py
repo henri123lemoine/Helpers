@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import fire
 
-from src.logging.helpers import log_all_methods
+from src.prompt_maker.prompt_maker import PromptMaker
 
 logging.basicConfig(
     level=logging.NOTSET,
@@ -17,12 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-@log_all_methods
 class Helpers:
-    def prompt_maker(self, *args, **kwargs):
-        from src.prompt_maker.prompt_maker import PromptMaker
-
-        getattr(PromptMaker(), args[0])(*args[1:], **kwargs)
+    def prompt_maker(self):
+        return PromptMaker()
 
 
 if __name__ == "__main__":
