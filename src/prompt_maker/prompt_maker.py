@@ -10,13 +10,7 @@ from typing import Union
 import pathspec
 import pyperclip
 
-from src.utils.settings import (
-    DATA_PATH,
-    DATE,
-    HISTORY_PATH,
-    PROJECT_PATH,
-    PYTHON_NOTEBOOKS_PATH,
-)
+from settings import DATA_PATH, DATE, HISTORY_PATH, PROJECT_PATH, PYTHON_NOTEBOOKS_PATH
 
 logger = logging.getLogger(__name__)
 
