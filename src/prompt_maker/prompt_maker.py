@@ -140,6 +140,9 @@ class PromptMaker:
         base_dir: Path,
         tree: bool = True,
     ) -> None:
+        # Create parent directories if they don't exist
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
         with output_file.open("w") as outfile:
             if tree:
                 self._write_tree_structure(outfile, base_dir)
